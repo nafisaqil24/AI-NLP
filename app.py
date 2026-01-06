@@ -28,16 +28,20 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
 
 
-# ===== NLTK setup (cek dulu, baru download) =====
-try:
-    nltk.data.find("tokenizers/punkt")
-except LookupError:
-    nltk.download("punkt", quiet=True)
+# ===== NLTK setup dengan folder lokal (penting untuk Railway) =====
+NLTK_DATA_DIR = os.path.join(os.path.dirname(__file__), "nltk_data")
+os.makedirs(NLTK_DATA_DIR, exist_ok=True)
+nltk.data.path.append(NLTK_DATA_DIR)
 
-try:
-    nltk.data.find("corpora/stopwords")
-except LookupError:
-    nltk.download("stopwords", quiet=True)
+for resource, locator in [
+    ("punkt", "tokenizers/punkt"),
+    ("stopwords", "corpora/stopwords"),
+]:
+    try:
+        nltk.data.find(locator)
+    except LookupError:
+        nltk.download(resource, download_dir=NLTK_DATA_DIR)
+
 
 
 app = Flask(__name__)
