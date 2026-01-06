@@ -9,7 +9,6 @@ from reportlab.lib.units import inch
 from reportlab.lib import colors
 from io import BytesIO
 
-
 from flask import (
     Flask, render_template, request,
     redirect, url_for, jsonify, session, send_file
@@ -27,22 +26,23 @@ from nltk.tokenize import sent_tokenize, word_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
 
-
-# ===== NLTK setup dengan folder lokal (penting untuk Railway) =====
+# ===== NLTK setup (minimal, hanya path) =====
 NLTK_DATA_DIR = os.path.join(os.path.dirname(__file__), "nltk_data")
 os.makedirs(NLTK_DATA_DIR, exist_ok=True)
-nltk.data.path.append(NLTK_DATA_DIR)
+nltk.data.path.insert(0, NLTK_DATA_DIR)
 
-for resource, locator in [
-    ("punkt", "tokenizers/punkt"),
-    ("stopwords", "corpora/stopwords"),
-]:
-    try:
-        nltk.data.find(locator)
-    except LookupError:
-        nltk.download(resource, download_dir=NLTK_DATA_DIR)
-
-
+# ===== Fungsi untuk ensure NLTK resources =====
+def ensure_nltk_resources():
+    """Pastikan resource NLTK tersedia di local folder"""
+    for resource, locator in [
+        ("punkt", "tokenizers/punkt"),
+        ("stopwords", "corpora/stopwords"),
+    ]:
+        try:
+            nltk.data.find(locator)
+        except LookupError:
+            print(f"Downloading {resource}...")
+            nltk.download(resource, download_dir=NLTK_DATA_DIR, quiet=True)
 
 app = Flask(__name__)
 
@@ -52,14 +52,15 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {"pdf", "docx"}
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+MAX_FILE_SIZE = 50 * 1024 * 1024
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 app.config["SECRET_KEY"] = "ganti-secret-key-ini"
 
-
 # ===== NLP setup =====
+ensure_nltk_resources()
+
 STOPWORDS = set(stopwords.words("indonesian"))
 STEMMER = StemmerFactory().create_stemmer()
 
@@ -81,7 +82,6 @@ KONSEP_JAWABAN = [
     "konsep",
 ]
 
-
 # =============================
 # UTIL: FILE
 # =============================
@@ -90,7 +90,6 @@ def allowed_file(filename: str) -> bool:
         "." in filename
         and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
     )
-
 
 def extract_text_from_file(filepath: str) -> str:
     """Extract teks dari PDF/DOCX + hapus daftar isi."""
@@ -112,7 +111,6 @@ def extract_text_from_file(filepath: str) -> str:
         if not text.strip():
             raise ValueError("File tidak mengandung teks")
 
-        # Hapus blok 'DAFTAR ISI' sampai 'BAB I'
         text = re.sub(
             r"DAFTAR ISI(.|\n)*?BAB I",
             "BAB I",
@@ -124,7 +122,6 @@ def extract_text_from_file(filepath: str) -> str:
 
     except Exception as e:
         raise Exception(f"Error extract teks: {e}")
-
 
 # =============================
 # NLP
@@ -139,7 +136,6 @@ def preprocess_text(text: str) -> str:
     ]
     return " ".join(tokens)
 
-
 def is_kalimat_valid(kalimat: str) -> bool:
     if len(kalimat) < 40:
         return False
@@ -150,7 +146,6 @@ def is_kalimat_valid(kalimat: str) -> bool:
     if len(kalimat) > 300:
         return False
     return True
-
 
 def extract_concept(kalimat: str) -> str:
     kalimat_clean = kalimat.lower()
@@ -175,23 +170,10 @@ def extract_concept(kalimat: str) -> str:
 
     return "Konsep"
 
-
 def analyze_text(text: str):
-    # Ambil kalimat berurutan dari materi, tidak diacak TF-IDF
     sentences = sent_tokenize(text)
     sentences = [s.strip() for s in sentences if is_kalimat_valid(s)]
-
-    # Batasi maksimal 30 kalimat pertama supaya tidak terlalu banyak
     return sentences[:30]
-
-    clean = [preprocess_text(s) for s in sentences]
-    tfidf = TfidfVectorizer(max_features=500)
-    matrix = tfidf.fit_transform(clean)
-    scores = matrix.sum(axis=1).A1
-
-    ranked = sorted(zip(sentences, scores), key=lambda x: x[1], reverse=True)
-    return [r[0] for r in ranked[:15]]
-
 
 # =============================
 # GENERATE ESSAY
@@ -204,7 +186,6 @@ def generate_essay_questions(sentences, jumlah: int):
         if len(hasil) >= jumlah:
             break
 
-        # Kalimat sudah difilter di analyze_text, jadi tidak perlu cek ulang terlalu banyak
         konsep = extract_concept(kalimat)
         if not konsep or konsep in konsep_dipakai:
             continue
@@ -212,7 +193,6 @@ def generate_essay_questions(sentences, jumlah: int):
         konsep_dipakai.add(konsep)
         teks = kalimat.lower()
 
-        # Tentukan tipe soal berdasarkan kata kunci di kalimat YANG SAMA
         if any(w in teks for w in ["adalah", "merupakan", "definisi"]):
             tipe = "definisi"
         elif "fungsi" in teks:
@@ -224,9 +204,7 @@ def generate_essay_questions(sentences, jumlah: int):
 
         kata_kerja = KATA_KERJA_KOGNITIF[tipe]
 
-        # Jawaban = kalimat yang sama dengan sumber konsep
         jawaban = kalimat
-        # (opsional) batasi panjang jawaban biar rapi
         if len(jawaban) > 300:
             jawaban = jawaban[:300] + "..."
 
@@ -302,7 +280,6 @@ def generate_pg_questions(sentences, jumlah: int):
 
     return hasil
 
-
 def generate_questions(sentences, jumlah: int, jenis: str):
     if jenis == "essay":
         return generate_essay_questions(sentences, jumlah)
@@ -310,9 +287,8 @@ def generate_questions(sentences, jumlah: int, jenis: str):
         return generate_pg_questions(sentences, jumlah)
     return []
 
-
 # =============================
-# DATABASE (opsional dipakai)
+# DATABASE
 # =============================
 def init_db():
     try:
@@ -350,10 +326,6 @@ def init_db():
     except Exception as e:
         print("DB init error:", e)
 
-
-# =============================
-# ROUTES
-# =============================
 # =============================
 # ROUTES
 # =============================
@@ -361,7 +333,8 @@ def init_db():
 def index():
     if request.method == "POST":
         try:
-            # validasi file
+            ensure_nltk_resources()
+            
             if "file" not in request.files:
                 return render_template("index.html", error="File tidak ditemukan"), 400
 
@@ -414,18 +387,13 @@ def index():
                     error="Tidak dapat menghasilkan soal dari file tersebut",
                 ), 400
 
-            # simpan ke session (untuk halaman result)
             session["materi"] = materi
             session["questions"] = questions
             session["jenis_soal"] = jenis_soal
 
-            # ==============================
-            # SIMPAN KE DATABASE
-            # ==============================
             conn = sqlite3.connect("database.db")
             c = conn.cursor()
 
-            # simpan 1 baris sesi
             c.execute(
                 """
                 INSERT INTO sessions (materi, jenis_soal, jumlah_soal)
@@ -435,29 +403,26 @@ def index():
             )
             session_id = c.lastrowid
 
-            # simpan semua soal
             for q in questions:
                 c.execute(
                     """
                     INSERT INTO questions (session_id, pertanyaan, jawaban, jenis)
                     VALUES (?, ?, ?, ?)
                     """,
-                    (session_id, q["question"], q["answer"], q["type"]),
+                    (session_id, q["question"], q.get("answer", ""), q["type"]),
                 )
 
             conn.commit()
             conn.close()
-            # ==============================
 
             os.remove(filepath)
 
             return redirect(url_for("result"))
 
         except Exception as e:
-            return render_template("index.html", error=f"Error: {e}"), 500
+            return render_template("index.html", error=f"Error: {str(e)}"), 500
 
     return render_template("index.html")
-
 
 @app.route("/result")
 def result():
@@ -476,7 +441,6 @@ def result():
         materi=materi,
     )
 
-
 @app.route("/download")
 def download():
     questions = session.get("questions")
@@ -485,20 +449,18 @@ def download():
     if not questions:
         return redirect(url_for("index"))
 
-    # Generate PDF
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4)
     story = []
     styles = getSampleStyleSheet()
 
-    # Judul
     title_style = ParagraphStyle(
         "CustomTitle",
         parent=styles["Heading1"],
         fontSize=16,
         textColor=colors.HexColor("#1f77d2"),
         spaceAfter=20,
-        alignment=1,  # center
+        alignment=1,
     )
     title = Paragraph("SOAL UJIAN", title_style)
     story.append(title)
@@ -508,38 +470,30 @@ def download():
     story.append(subtitle)
     story.append(Spacer(1, 0.3 * inch))
 
-    # Soal
     for idx, q in enumerate(questions, 1):
-        # Nomor dan pertanyaan
         question_text = f"<b>{idx}. {q['question']}</b>"
         story.append(Paragraph(question_text, styles["Normal"]))
 
         if jenis_soal == "pg":
-            # Opsi jawaban
             for i, opt in enumerate(q.get("options", []), 1):
                 story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;{chr(96+i)}. {opt}", styles["Normal"]))
             story.append(Spacer(1, 0.2 * inch))
 
-        else:  # essay
-            # Tempat jawaban
+        else:
             story.append(Paragraph("<i>Jawaban:</i>", styles["Normal"]))
             story.append(Spacer(1, 0.5 * inch))
 
         story.append(Spacer(1, 0.2 * inch))
 
-    # Build PDF
     doc.build(story)
     buffer.seek(0)
 
-    # Return sebagai file download
     return send_file(
         buffer,
         as_attachment=True,
         download_name="soal_ujian.pdf",
         mimetype="application/pdf",
     )
-
-
 
 @app.errorhandler(413)
 def too_large(e):
@@ -551,7 +505,6 @@ def too_large(e):
         413,
     )
 
-
 @app.errorhandler(500)
 def internal_error(e):
     return (
@@ -561,7 +514,6 @@ def internal_error(e):
         ),
         500,
     )
-
 
 if __name__ == "__main__":
     init_db()
